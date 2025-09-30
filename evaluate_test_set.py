@@ -253,17 +253,27 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
             
             # 重新對應結果到原始索引
             all_predictions = []
+            all_confidences = []  # 新增信心分數收集
+            all_image_paths_with_results = []  # 對應的圖片路徑
             valid_idx = 0
             
             for i, img_path in enumerate(all_image_paths):
                 if img_path is not None:
                     if valid_idx < len(batch_results):
                         all_predictions.append(batch_results[valid_idx]['prediction'])
+                        # 檢查是否有信心分數
+                        confidence = batch_results[valid_idx].get('confidence', 0.0)
+                        all_confidences.append(confidence)
+                        all_image_paths_with_results.append(batch_results[valid_idx]['path'])
                         valid_idx += 1
                     else:
                         all_predictions.append(-1)
+                        all_confidences.append(0.0)
+                        all_image_paths_with_results.append(None)
                 else:
                     all_predictions.append(-1)
+                    all_confidences.append(0.0)
+                    all_image_paths_with_results.append(None)
             
             # 清理資源
             if hasattr(npu_inference, 'shutdown'):
@@ -273,14 +283,26 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
             # 回退到單張處理
             print("🔄 使用單張推理模式...")
             all_predictions = []
+            all_confidences = []  # 單張推理模式不支援信心分數
+            all_image_paths_with_results = []
             
             with tqdm(total=len(all_image_paths), desc="AMD NPU 推理中", ncols=80) as pbar:
                 for img_path in all_image_paths:
                     if img_path and os.path.exists(img_path):
-                        pred = npu_inference.predict_image(img_path)
-                        all_predictions.append(pred)
+                        # 檢查是否支援信心分數
+                        if hasattr(npu_inference, 'predict_image_with_confidence'):
+                            pred, confidence = npu_inference.predict_image_with_confidence(img_path)
+                            all_predictions.append(pred)
+                            all_confidences.append(confidence)
+                        else:
+                            pred = npu_inference.predict_image(img_path)
+                            all_predictions.append(pred)
+                            all_confidences.append(0.0)  # 不支援信心分數
+                        all_image_paths_with_results.append(img_path)
                     else:
                         all_predictions.append(-1)
+                        all_confidences.append(0.0)
+                        all_image_paths_with_results.append(None)
                     
                     pbar.update(1)
                     pbar.set_postfix({'已處理': len(all_predictions)})
@@ -288,9 +310,11 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
         # 儲存預測結果
         results_file = "test_predictions_optimized_amd_npu.csv"
         with open(results_file, 'w', encoding='utf-8') as f:
-            f.write("Id,Category\n")
+            f.write("Id,Category,Confidence,Path\n")
             for i, pred in enumerate(all_predictions):
-                f.write(f"{i},{pred}\n")
+                confidence = all_confidences[i] if i < len(all_confidences) else 0.0
+                path = all_image_paths_with_results[i] if i < len(all_image_paths_with_results) else "Unknown"
+                f.write(f"{i},{pred},{confidence:.4f},{path}\n")
         
         print(f"\n✅ 最佳化 AMD NPU 評估完成！")
         print(f"📁 預測結果已儲存至: {results_file}")
@@ -305,6 +329,48 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
             print(f"   類別 {class_id}: {count} 張圖片")
         
         print(f"\n🚀 AMD Ryzen AI NPU 最佳化推理完成！NPU 使用率已最大化！")
+        
+        # 新增：自動挑選信心分數低的圖片並開啟顯示
+        try:
+            import subprocess
+            threshold = 0.5  # 信心分數門檻
+            max_show = 10    # 最多顯示圖片數量
+            
+            # 找出信心分數低的圖片
+            low_confidence_images = []
+            for i, (confidence, path) in enumerate(zip(all_confidences, all_image_paths_with_results)):
+                if confidence > 0 and confidence < threshold and path and os.path.exists(path):
+                    low_confidence_images.append((i, confidence, path))
+            
+            # 按信心分數排序（最低的優先）
+            low_confidence_images = sorted(low_confidence_images, key=lambda x: x[1])[:max_show]
+            
+            if low_confidence_images:
+                print(f"\n🔍 發現 {len(low_confidence_images)} 張預測信心低於 {threshold} 的圖片：")
+                print("=" * 60)
+                
+                for idx, confidence, path in low_confidence_images:
+                    predicted_class = all_predictions[idx]
+                    print(f"  📷 圖片編號: {idx}")
+                    print(f"  🎯 預測類別: {predicted_class}")
+                    print(f"  📊 信心分數: {confidence:.3f}")
+                    print(f"  📁 路徑: {path}")
+                    print("-" * 40)
+                    
+                    # 使用 Windows 預設程式開啟圖片
+                    try:
+                        subprocess.Popen(['start', '', path], shell=True)
+                        print(f"  ✅ 已開啟圖片檢視器")
+                    except Exception as e:
+                        print(f"  ⚠️  無法開啟圖片: {e}")
+                    print()
+                
+                print(f"🎯 已自動開啟 {len(low_confidence_images)} 張低信心圖片供檢視")
+            else:
+                print(f"\n✅ 太棒了！沒有信心分數低於 {threshold} 的圖片！模型表現優異！")
+                
+        except Exception as e:
+            print(f"\n⚠️  低信心圖片顯示功能發生錯誤: {e}")
         
     except ImportError as e:
         print(f"❌ AMD NPU 模組載入失敗: {e}")

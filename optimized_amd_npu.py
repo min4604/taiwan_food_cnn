@@ -287,13 +287,17 @@ class OptimizedAMDNPUInference:
                 batch_time = time.time() - batch_start
                 
                 output = result[0]
+                # 計算 softmax 以獲得信心分數
+                batch_softmax = np.exp(output) / np.sum(np.exp(output), axis=1, keepdims=True)
                 batch_predictions = np.argmax(output, axis=1)
+                batch_confidences = np.max(batch_softmax, axis=1)
                 
                 for j, item in enumerate(batch):
                     predictions.append({
                         'id': item['id'],
                         'path': item['path'],
                         'prediction': int(batch_predictions[j]),
+                        'confidence': float(batch_confidences[j]),
                         'inference_time': batch_time / len(batch)
                     })
                 
@@ -306,6 +310,7 @@ class OptimizedAMDNPUInference:
                         'id': item['id'],
                         'path': item['path'],
                         'prediction': -1,
+                        'confidence': 0.0,
                         'inference_time': 0
                     })
         
@@ -339,12 +344,15 @@ class OptimizedAMDNPUInference:
                 
                 with torch.no_grad():
                     output = self.pytorch_model(input_tensor)
-                    predicted_class = torch.argmax(output, dim=1).item()
+                    # 計算 softmax 以獲得信心分數
+                    softmax_output = torch.softmax(output, dim=1)
+                    confidence, predicted_class = torch.max(softmax_output, dim=1)
                 
                 predictions.append({
                     'id': i,
                     'path': img_path,
-                    'prediction': predicted_class,
+                    'prediction': predicted_class.item(),
+                    'confidence': confidence.item(),
                     'inference_time': 0
                 })
                 
@@ -354,6 +362,7 @@ class OptimizedAMDNPUInference:
                     'id': i,
                     'path': img_path,
                     'prediction': -1,
+                    'confidence': 0.0,
                     'inference_time': 0
                 })
         

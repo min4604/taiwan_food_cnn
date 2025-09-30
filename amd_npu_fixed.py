@@ -154,6 +154,36 @@ class AMDNPUInference:
         except Exception as e:
             print(f"❌ 推理失敗: {e}")
             return -1
+    
+    def predict_image_with_confidence(self, image_path):
+        """使用 AMD NPU 進行圖片推理並返回信心分數"""
+        try:
+            # 載入和預處理圖片
+            image = Image.open(image_path).convert('RGB')
+            input_tensor = self.transform(image).unsqueeze(0)
+            input_array = input_tensor.numpy()
+            
+            if self.ort_session:
+                # 使用 ONNX Runtime (AMD NPU)
+                input_name = self.ort_session.get_inputs()[0].name
+                result = self.ort_session.run(None, {input_name: input_array})
+                output = result[0]
+                # 計算 softmax 以獲得信心分數
+                softmax_output = np.exp(output) / np.sum(np.exp(output), axis=1, keepdims=True)
+                predicted_class = np.argmax(output, axis=1)[0]
+                confidence = np.max(softmax_output, axis=1)[0]
+                return predicted_class, float(confidence)
+            else:
+                # 使用 PyTorch CPU 備援
+                with torch.no_grad():
+                    output = self.pytorch_model(input_tensor)
+                    softmax_output = torch.softmax(output, dim=1)
+                    confidence, predicted_class = torch.max(softmax_output, dim=1)
+                    return predicted_class.item(), confidence.item()
+            
+        except Exception as e:
+            print(f"❌ 推理失敗: {e}")
+            return -1, 0.0
 
 def test_amd_npu():
     """測試 AMD NPU 功能"""

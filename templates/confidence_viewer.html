@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍜 台灣美食 CNN - 信心分數檢視器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #ff6b6b, #ffa500);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .control-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .control-item label {
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .control-item input, .control-item select {
+            padding: 8px 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .stats {
+            background: #e3f2fd;
+            padding: 15px;
+            margin: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #2196f3;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #1976d2;
+        }
+        
+        .results {
+            padding: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #666;
+        }
+        
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .image-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .image-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .image-container {
+            position: relative;
+            height: 200px;
+            overflow: hidden;
+        }
+        
+        .image-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s;
+        }
+        
+        .image-container:hover img {
+            transform: scale(1.1);
+        }
+        
+        .confidence-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 15px;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .confidence-very-low { background: #f44336; }
+        .confidence-low { background: #ff9800; }
+        .confidence-medium { background: #ffeb3b; color: #333; }
+        .confidence-high { background: #4caf50; }
+        
+        .card-content {
+            padding: 15px;
+        }
+        
+        .card-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .card-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .category-tag {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            margin: 20px;
+            border-radius: 5px;
+            border-left: 5px solid #f44336;
+        }
+        
+        @media (max-width: 768px) {
+            .control-group {
+                flex-direction: column;
+            }
+            
+            .image-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍜 台灣美食 CNN 分類系統</h1>
+            <p>信心分數檢視器 - 分析模型預測結果</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <div class="control-item">
+                    <label for="threshold">信心門檻值</label>
+                    <input type="number" id="threshold" min="0" max="1" step="0.1" value="0.5">
+                </div>
+                <div class="control-item">
+                    <label for="limit">顯示數量</label>
+                    <input type="number" id="limit" min="1" max="100" value="20">
+                </div>
+                <div class="control-item">
+                    <label for="sort">排序方式</label>
+                    <select id="sort">
+                        <option value="confidence">信心分數</option>
+                        <option value="category">預測類別</option>
+                        <option value="id">圖片編號</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="loadResults()">🔍 載入結果</button>
+                <button class="btn" onclick="loadStats()">📊 顯示統計</button>
+            </div>
+        </div>
+        
+        <div id="stats" class="stats" style="display: none;">
+            <h3>📊 預測統計資訊</h3>
+            <div class="stats-grid" id="stats-content">
+                <!-- 統計資訊將在這裡顯示 -->
+            </div>
+        </div>
+        
+        <div class="results">
+            <div id="loading" class="loading">
+                🔄 載入中，請稍候...
+            </div>
+            
+            <div id="error" class="error" style="display: none;">
+                <!-- 錯誤訊息將在這裡顯示 -->
+            </div>
+            
+            <div id="results-info" style="display: none; margin-bottom: 20px; text-align: center; color: #666;">
+                <!-- 結果資訊將在這裡顯示 -->
+            </div>
+            
+            <div id="image-grid" class="image-grid">
+                <!-- 圖片將在這裡顯示 -->
+            </div>
+            
+            <div id="no-results" class="no-results" style="display: none;">
+                <h3>😊 沒有找到符合條件的圖片</h3>
+                <p>嘗試調整信心門檻值或增加顯示數量</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResults = [];
+        
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('image-grid').innerHTML = '';
+            document.getElementById('no-results').style.display = 'none';
+            document.getElementById('results-info').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function showError(message) {
+            hideLoading();
+            const errorDiv = document.getElementById('error');
+            errorDiv.innerHTML = `❌ 錯誤: ${message}`;
+            errorDiv.style.display = 'block';
+        }
+        
+        function getConfidenceClass(confidence) {
+            if (confidence < 0.3) return 'confidence-very-low';
+            if (confidence < 0.5) return 'confidence-low';
+            if (confidence < 0.8) return 'confidence-medium';
+            return 'confidence-high';
+        }
+        
+        function getConfidenceText(confidence) {
+            if (confidence < 0.3) return '非常低';
+            if (confidence < 0.5) return '低';
+            if (confidence < 0.8) return '中等';
+            return '高';
+        }
+        
+        function displayResults(data) {
+            hideLoading();
+            
+            const resultsInfo = document.getElementById('results-info');
+            const imageGrid = document.getElementById('image-grid');
+            const noResults = document.getElementById('no-results');
+            
+            if (data.results.length === 0) {
+                noResults.style.display = 'block';
+                return;
+            }
+            
+            // 顯示結果資訊
+            resultsInfo.innerHTML = `
+                📊 找到 ${data.filtered} 張符合條件的圖片 (總共 ${data.total} 張)
+                | 門檻值: ${data.threshold} | 更新時間: ${new Date(data.timestamp).toLocaleString()}
+            `;
+            resultsInfo.style.display = 'block';
+            
+            // 顯示圖片
+            imageGrid.innerHTML = '';
+            data.results.forEach(result => {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                
+                const confidenceClass = getConfidenceClass(result.confidence);
+                const confidenceText = getConfidenceText(result.confidence);
+                
+                card.innerHTML = `
+                    <div class="image-container">
+                        ${result.image_exists ? 
+                            `<img src="${result.image_data}" alt="圖片 ${result.id}" onerror="this.style.display='none'">` :
+                            `<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f5f5f5; color: #999;">圖片載入失敗</div>`
+                        }
+                        <div class="confidence-badge ${confidenceClass}">
+                            ${confidenceText} ${result.confidence.toFixed(3)}
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="card-title">圖片編號 ${result.id}</div>
+                        <div class="card-info">
+                            <span>預測類別: ${result.category}</span>
+                            <span class="category-tag">${result.class_name}</span>
+                        </div>
+                        <div class="card-info">
+                            <span>信心分數: ${result.confidence.toFixed(4)}</span>
+                            <span style="font-size: 12px; color: #999;">${result.path}</span>
+                        </div>
+                    </div>
+                `;
+                
+                imageGrid.appendChild(card);
+            });
+        }
+        
+        function loadResults() {
+            showLoading();
+            
+            const threshold = document.getElementById('threshold').value;
+            const limit = document.getElementById('limit').value;
+            const sort = document.getElementById('sort').value;
+            
+            fetch(`/api/results?threshold=${threshold}&limit=${limit}&sort=${sort}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentResults = data.results;
+                        displayResults(data);
+                    } else {
+                        showError(data.error);
+                    }
+                })
+                .catch(error => {
+                    showError(`網路錯誤: ${error.message}`);
+                });
+        }
+        
+        function loadStats() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayStats(data.stats);
+                    } else {
+                        showError(data.error);
+                    }
+                })
+                .catch(error => {
+                    showError(`統計載入失敗: ${error.message}`);
+                });
+        }
+        
+        function displayStats(stats) {
+            const statsDiv = document.getElementById('stats');
+            const statsContent = document.getElementById('stats-content');
+            
+            statsContent.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-value">${stats.total_images}</div>
+                    <div>總圖片數</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.avg_confidence.toFixed(3)}</div>
+                    <div>平均信心</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.low_confidence_count}</div>
+                    <div>低信心圖片</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.medium_confidence_count}</div>
+                    <div>中等信心圖片</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.high_confidence_count}</div>
+                    <div>高信心圖片</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.min_confidence.toFixed(3)}</div>
+                    <div>最低信心</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${stats.max_confidence.toFixed(3)}</div>
+                    <div>最高信心</div>
+                </div>
+            `;
+            
+            statsDiv.style.display = 'block';
+        }
+        
+        // 頁面載入時自動載入結果
+        window.onload = function() {
+            loadResults();
+            loadStats();
+        };
+        
+        // 按 Enter 鍵載入結果
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadResults();
+            }
+        });
+    </script>
+</body>
+</html>
