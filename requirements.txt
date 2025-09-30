@@ -1,0 +1,29 @@
+# 台灣美食 CNN 專案依賴套件
+
+# 深度學習框架
+tensorflow>=2.13.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 數據處理
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+
+# 圖像處理
+opencv-python>=4.5.0
+Pillow>=8.3.0
+
+# 視覺化
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# 進度條
+tqdm>=4.62.0
+
+# Jupyter 支援 (可選)
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# 模型分析工具 (可選)
+tensorboard>=2.8.0
