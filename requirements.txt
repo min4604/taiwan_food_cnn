@@ -2,8 +2,15 @@
 
 # 深度學習框架
 tensorflow>=2.13.0
-torch>=2.0.0
-torchvision>=0.15.0
+
+# PyTorch 支援 GPU (在 Windows 上可使用 CUDA)
+torch>=2.0.0+cu118
+torchvision>=0.15.0+cu118
+torchaudio>=2.0.0+cu118
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# 進度條顯示
+tqdm>=4.60.0
 
 # 數據處理
 numpy>=1.21.0

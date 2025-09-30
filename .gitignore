@@ -1,3 +1,4 @@
 # Exclude archive directory and all its contents
 archive/
 venvCNN/
+models/
