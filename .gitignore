@@ -2,3 +2,5 @@
 archive/
 venvCNN/
 models/
+downloads/
+__pycache__/

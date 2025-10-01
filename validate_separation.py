@@ -1,159 +1,171 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-驗證台灣美食資料集的訓練/測試分離
-確保測試資料完全不參與訓練
+驗證訓練集與測試集分離性腳本
+
+功能：
+1. 計算測試集中所有圖片的感知雜湊 (perceptual hash)。
+2. 遍歷訓練集，計算每張圖片的雜湊，並與測試集進行比對。
+3. 找出與測試集圖片完全相同或高度相似的訓練圖片。
+4. 產生報告，並提供可選的自動刪除功能。
+
+使用此腳本可以避免訓練資料中包含測試資料，確保模型評估的公正性。
 """
 
 import os
-import pandas as pd
-from data_loader import TaiwanFoodDataLoader
+import argparse
+from pathlib import Path
+from collections import defaultdict
 
-def validate_data_separation():
-    """詳細驗證資料分離"""
-    print("=" * 60)
-    print("台灣美食資料集分離驗證")
-    print("=" * 60)
+try:
+    from PIL import Image
+    import imagehash
+except ImportError:
+    print("缺少必要的套件，請執行: pip install Pillow imagehash")
+    exit(1)
+
+def compute_hashes(directory: Path, hash_size: int = 8) -> dict:
+    """
+    計算指定目錄下所有圖片的感知雜湊值。
     
-    data_dir = "archive/tw_food_101"
+    返回一個字典，key 是雜湊值，value 是對應的檔案路徑列表。
+    """
+    hashes = defaultdict(list)
+    image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
     
-    # 1. 檢查 CSV 檔案
-    train_csv = os.path.join(data_dir, "tw_food_101_train.csv")
-    test_csv = os.path.join(data_dir, "tw_food_101_test_list.csv")
+    print(f"正在計算 '{directory}' 中的圖片雜湊值...")
     
-    if not os.path.exists(train_csv):
-        print(f"❌ 找不到訓練 CSV: {train_csv}")
-        return False
+    image_files = [p for p in directory.rglob('*') if p.suffix.lower() in image_extensions]
     
-    if not os.path.exists(test_csv):
-        print(f"❌ 找不到測試 CSV: {test_csv}")
-        return False
-    
-    # 2. 載入資料
-    print("📖 載入資料...")
-    df_train = pd.read_csv(train_csv, header=None, names=['index', 'class_id', 'image_path'])
-    df_test = pd.read_csv(test_csv, header=None, names=['index', 'image_path'])
-    
-    print(f"訓練資料: {len(df_train)} 筆")
-    print(f"測試資料: {len(df_test)} 筆")
-    
-    # 3. 檢查檔案路徑重疊
-    print("\n🔍 檢查檔案重疊...")
-    train_paths = set(df_train['image_path'].tolist())
-    test_paths = set(df_test['image_path'].tolist())
-    
-    overlap = train_paths.intersection(test_paths)
-    
-    if overlap:
-        print(f"❌ 發現 {len(overlap)} 個重疊檔案！")
-        print("重疊檔案:")
-        for i, path in enumerate(sorted(overlap)):
-            print(f"  {i+1:3d}. {path}")
-            if i >= 10:  # 只顯示前10個
-                print(f"      ... 還有 {len(overlap) - 10} 個")
-                break
-        return False
-    else:
-        print("✅ 訓練和測試檔案完全分離")
-    
-    # 4. 檢查檔案存在性
-    print("\n📁 檢查檔案存在性...")
-    
-    # 檢查訓練檔案
-    missing_train = 0
-    for i, path in enumerate(df_train['image_path']):
-        full_path = os.path.join(data_dir, path)
-        if not os.path.exists(full_path):
-            missing_train += 1
-            if missing_train <= 5:  # 只顯示前5個缺失檔案
-                print(f"  缺失訓練檔案: {path}")
-    
-    # 檢查測試檔案
-    missing_test = 0
-    for i, path in enumerate(df_test['image_path']):
-        full_path = os.path.join(data_dir, path)
-        if not os.path.exists(full_path):
-            missing_test += 1
-            if missing_test <= 5:  # 只顯示前5個缺失檔案
-                print(f"  缺失測試檔案: {path}")
-    
-    print(f"訓練檔案: {len(df_train) - missing_train}/{len(df_train)} 存在")
-    print(f"測試檔案: {len(df_test) - missing_test}/{len(df_test)} 存在")
-    
-    # 5. 檢查類別分布
-    print("\n📊 檢查訓練資料類別分布...")
-    class_counts = df_train['class_id'].value_counts().sort_index()
-    
-    print(f"總類別數: {len(class_counts)}")
-    print(f"類別範圍: {class_counts.index.min()} - {class_counts.index.max()}")
-    print(f"平均每類樣本數: {class_counts.mean():.1f}")
-    print(f"最少樣本數: {class_counts.min()}")
-    print(f"最多樣本數: {class_counts.max()}")
-    
-    # 6. 測試資料載入器
-    print("\n🔧 測試資料載入器...")
-    try:
-        loader = TaiwanFoodDataLoader(data_dir=data_dir)
-        
-        # 檢查測試檔案列表是否正確載入
-        expected_test_files = set(df_test['image_path'].tolist())
-        actual_test_files = loader.test_files
-        
-        if expected_test_files == actual_test_files:
-            print("✅ 資料載入器正確載入測試檔案列表")
-        else:
-            print("❌ 資料載入器測試檔案列表不正確")
-            missing_in_loader = expected_test_files - actual_test_files
-            extra_in_loader = actual_test_files - expected_test_files
-            
-            if missing_in_loader:
-                print(f"  載入器中缺失 {len(missing_in_loader)} 個測試檔案")
-            if extra_in_loader:
-                print(f"  載入器中多出 {len(extra_in_loader)} 個檔案")
-        
-        # 測試實際載入少量資料
-        print("\n🧪 測試實際資料載入...")
+    if not image_files:
+        print(f"警告：在 '{directory}' 中找不到任何圖片檔案。")
+        return {}
+
+    for i, img_path in enumerate(image_files):
         try:
-            (X_train, y_train), (X_val, y_val) = loader.load_dataset_from_csv('train', validation_split=0.1)
-            print(f"✅ 成功載入訓練資料: {X_train.shape}")
-            print(f"✅ 成功載入驗證資料: {X_val.shape}")
-            
-            # 檢查是否有測試檔案混入訓練資料（這在新的載入器中應該不會發生）
-            print("   已確保測試檔案完全不參與訓練")
-            
+            with Image.open(img_path) as img:
+                # 使用 average hash，速度快且效果好
+                h = imagehash.average_hash(img, hash_size=hash_size)
+                hashes[h].append(str(img_path))
         except Exception as e:
-            print(f"❌ 載入訓練資料失敗: {e}")
-            return False
+            print(f"無法處理檔案 {img_path}: {e}")
+        
+        # 顯示進度
+        if (i + 1) % 200 == 0 or (i + 1) == len(image_files):
+            print(f"  已處理 {i + 1}/{len(image_files)} 張圖片", end='\r')
             
-    except Exception as e:
-        print(f"❌ 建立資料載入器失敗: {e}")
-        return False
+    print(f"\n完成！共計算了 {len(image_files)} 張圖片，得到 {len(hashes)} 個獨立雜湊。")
+    return hashes
+
+def find_duplicates(test_hashes: dict, train_dir: Path, similarity_threshold: int = 5, hash_size: int = 8):
+    """
+    在訓練集中尋找與測試集重複或相似的圖片。
+    """
+    duplicates = []
+    image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
     
-    # 7. 總結
-    print("\n" + "=" * 60)
-    success = (
-        len(overlap) == 0 and
-        missing_train == 0 and
-        missing_test == 0
-    )
+    print(f"\n正在掃描訓練目錄 '{train_dir}' 並與測試集比對...")
     
-    if success:
-        print("🎉 驗證成功！")
-        print("✅ 訓練和測試資料完全分離")
-        print("✅ 所有檔案都存在")
-        print("✅ 資料載入器正確工作")
-        print("🚀 可以安全開始訓練")
+    train_image_files = [p for p in train_dir.rglob('*') if p.suffix.lower() in image_extensions]
+
+    if not train_image_files:
+        print(f"警告：在 '{train_dir}' 中找不到任何圖片檔案。")
+        return []
+
+    test_hash_keys = list(test_hashes.keys())
+
+    for i, train_img_path in enumerate(train_image_files):
+        try:
+            with Image.open(train_img_path) as img:
+                train_hash = imagehash.average_hash(img, hash_size=hash_size)
+                
+                # 1. 檢查精確重複
+                if train_hash in test_hashes:
+                    match_info = {
+                        "train_image": str(train_img_path),
+                        "test_images": test_hashes[train_hash],
+                        "distance": 0,
+                        "type": "精確重複"
+                    }
+                    duplicates.append(match_info)
+                    print(f"\n發現精確重複: {train_img_path}")
+                    continue # 找到精確重複就不用再比對相似度
+
+                # 2. 檢查相似重複
+                for test_hash in test_hash_keys:
+                    distance = train_hash - test_hash
+                    if distance <= similarity_threshold:
+                        match_info = {
+                            "train_image": str(train_img_path),
+                            "test_images": test_hashes[test_hash],
+                            "distance": distance,
+                            "type": "相似重複"
+                        }
+                        duplicates.append(match_info)
+                        print(f"\n發現相似重複 (差異度 {distance}): {train_img_path}")
+                        break # 找到一個相似的就夠了
+        except Exception as e:
+            print(f"無法處理檔案 {train_img_path}: {e}")
+            
+        # 顯示進度
+        if (i + 1) % 100 == 0 or (i + 1) == len(train_image_files):
+            print(f"  已掃描 {i + 1}/{len(train_image_files)} 張訓練圖片", end='\r')
+            
+    print(f"\n掃描完成！")
+    return duplicates
+
+def main():
+    parser = argparse.ArgumentParser(description="驗證訓練集與測試集的分離性，避免資料洩漏。")
+    parser.add_argument("--test-dir", type=str, default="archive/tw_food_101/test", help="測試集圖片資料夾路徑。")
+    parser.add_argument("--train-dir", type=str, default="downloads/bing_images", help="要檢查的訓練集圖片資料夾路徑。")
+    parser.add_argument("--threshold", type=int, default=5, help="相似度閾值 (漢明距離)，數值越小表示要求越相似。0 代表完全相同。")
+    parser.add_argument("--delete", action="store_true", help="如果設定此旗標，將會自動刪除在訓練集中找到的重複圖片。")
+    
+    args = parser.parse_args()
+
+    test_dir = Path(args.test_dir)
+    train_dir = Path(args.train_dir)
+
+    if not test_dir.exists() or not test_dir.is_dir():
+        print(f"錯誤：測試目錄 '{test_dir}' 不存在或不是一個資料夾。")
+        return
+    if not train_dir.exists() or not train_dir.is_dir():
+        print(f"錯誤：訓練目錄 '{train_dir}' 不存在或不是一個資料夾。")
+        return
+
+    # 步驟 1: 計算測試集的雜湊
+    test_hashes = compute_hashes(test_dir)
+    if not test_hashes:
+        return
+
+    # 步驟 2: 在訓練集中尋找重複
+    duplicates = find_duplicates(test_hashes, train_dir, similarity_threshold=args.threshold)
+
+    # 步驟 3: 報告與處理
+    if not duplicates:
+        print("\n🎉 恭喜！訓練集中未發現與測試集重複或高度相似的圖片。")
     else:
-        print("⚠️  驗證發現問題")
-        if overlap:
-            print("❌ 訓練和測試資料有重疊")
-        if missing_train > 0:
-            print(f"❌ 缺失 {missing_train} 個訓練檔案")
-        if missing_test > 0:
-            print(f"❌ 缺失 {missing_test} 個測試檔案")
-        print("請修復問題後重新驗證")
-    
-    print("=" * 60)
-    return success
+        print(f"\n⚠️ 發現 {len(duplicates)} 個重複/相似的圖片：")
+        files_to_delete = []
+        for item in duplicates:
+            print(f"  - 訓練圖片: {item['train_image']}")
+            print(f"    類型: {item['type']} (差異度: {item['distance']})")
+            print(f"    對應測試圖片: {', '.join(item['test_images'])}")
+            files_to_delete.append(item['train_image'])
+        
+        if args.delete:
+            print("\n--delete 旗標已設定，開始刪除重複的訓練圖片...")
+            deleted_count = 0
+            for f_path in files_to_delete:
+                try:
+                    os.remove(f_path)
+                    print(f"  已刪除: {f_path}")
+                    deleted_count += 1
+                except OSError as e:
+                    print(f"  刪除失敗: {f_path} ({e})")
+            print(f"\n共刪除了 {deleted_count} 個檔案。")
+        else:
+            print("\n提示：若要自動刪除這些重複檔案，請在執行指令時加上 --delete 旗標。")
 
 if __name__ == "__main__":
-    validate_data_separation()
+    main()

@@ -358,12 +358,7 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
                     print("-" * 40)
                     
                     # 使用 Windows 預設程式開啟圖片
-                    try:
-                        subprocess.Popen(['start', '', path], shell=True)
-                        print(f"  ✅ 已開啟圖片檢視器")
-                    except Exception as e:
-                        print(f"  ⚠️  無法開啟圖片: {e}")
-                    print()
+                    
                 
                 print(f"🎯 已自動開啟 {len(low_confidence_images)} 張低信心圖片供檢視")
             else:
@@ -541,7 +536,9 @@ if __name__ == '__main__':
         # 開始評估
         evaluate_on_test_set(
             model_path=model_path,
-            test_csv='archive/tw_food_101/tw_food_101_test_list.csv',
-            test_img_dir='archive/tw_food_101/test',
+            #test_csv='archive/tw_food_101/tw_food_101_test_list.csv',
+            #test_img_dir='archive/tw_food_101/test',
+            test_csv='downloads/train_list.csv',
+            test_img_dir='downloads/bing_images',
             manual_device_selection=manual_mode
         )

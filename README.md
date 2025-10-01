@@ -88,6 +88,9 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); 
 
 開啟虛擬環境方式 CMD
 # venvCNN\Scripts\activate.bat
+照片爬蟲
+
+# python bing_image_crawler.py --images-per-class 600 --start-id 51 --end-id 61                                               
 
 開啟虛擬環境方式 powershell
 #  .\venvCNN\Scripts\Activate.ps1

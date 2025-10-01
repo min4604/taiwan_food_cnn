@@ -85,55 +85,72 @@ class BingImageCrawler:
         return classes
 
     def search_bing_images(self, query: str, max_images: int) -> List[str]:
-        """從 Bing 搜尋並返回圖片 URL 列表"""
-        urls: List[str] = []
+        """從 Bing 搜尋並返回圖片 URL 列表，包含正確的分頁邏輯"""
+        urls = set()
         search_url = "https://www.bing.com/images/search"
-        
-        params = {
-            'q': query,
-            'form': 'HDRSC3', # 更新 form code
-            'first': 1,
-            'count': max(35, max_images),
-            'mmasync': 1,
-            'adlt': self.adult_filter,
-        }
+        page_size = 35  # Bing 的大約頁面大小
+        current_offset = 0
+        retries = 3
 
-        try:
-            res = self.session.get(search_url, params=params)
-            res.raise_for_status()
-            
-            # 新策略：使用 BeautifulSoup 解析 HTML
-            soup = BeautifulSoup(res.text, 'lxml')
-            
-            # 尋找所有包含圖片資料的 'a' 標籤
-            # 這些標籤通常有 'iusc' class，且 'm' 屬性包含 JSON 資料
-            image_links = soup.find_all('a', class_='iusc')
-            
-            if not image_links:
-                print("  ✗ 使用 BeautifulSoup 找不到 'a.iusc' 標籤，Bing 可能已更新。")
-                return []
+        print(f"  - 開始搜尋 '{query}'，目標 {max_images} 張圖片...")
 
-            for link in image_links:
-                if len(urls) >= max_images:
+        while len(urls) < max_images:
+            params = {
+                'q': query,
+                'form': 'HDRSC3',
+                'first': current_offset,
+                'count': page_size,
+                'mmasync': 1,
+                'adlt': self.adult_filter,
+            }
+
+            try:
+                res = self.session.get(search_url, params=params)
+                res.raise_for_status()
+                
+                soup = BeautifulSoup(res.text, 'lxml')
+                image_links = soup.find_all('a', class_='iusc')
+                
+                if not image_links:
+                    print("  - ⚠ 找不到更多圖片結果，可能已達搜尋結尾。")
+                    break
+
+                new_images_found_this_page = 0
+                for link in image_links:
+                    if 'm' in link.attrs:
+                        try:
+                            m_data = json.loads(link['m'])
+                            if image_url := m_data.get("murl"):
+                                if image_url not in urls:
+                                    urls.add(image_url)
+                                    new_images_found_this_page += 1
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+                
+                print(f"  - 第 {current_offset // page_size + 1} 頁找到 {new_images_found_this_page} 張新圖片 (目前總數: {len(urls)})")
+
+                if new_images_found_this_page == 0 and current_offset > 0:
+                    print("  - ⚠ 本頁未找到新圖片，可能已達搜尋結尾。")
                     break
                 
-                # 'm' 屬性是一個 JSON 字串，我們需要解析它
-                if 'm' in link.attrs:
-                    try:
-                        m_data = json.loads(link['m'])
-                        # 'murl' 是媒體的直接 URL
-                        if image_url := m_data.get("murl"):
-                            urls.append(image_url)
-                    except (json.JSONDecodeError, KeyError):
-                        # 忽略解析失敗的項目
-                        continue
+                # 正確的分頁邏輯
+                current_offset += page_size
+                
+                # 禮貌性延遲
+                time.sleep(self.request_delay)
 
-        except requests.RequestException as e:
-            print(f"  ✗ 搜尋請求失敗: {e}")
-        except Exception as e:
-            print(f"  ✗ 處理搜尋結果時發生未知錯誤: {e}")
-
-        return urls
+            except requests.RequestException as e:
+                print(f"  - ✗ 網路請求失敗: {e}")
+                retries -= 1
+                if retries <= 0:
+                    print("  - ✗ 連續請求失敗，跳過此查詢。")
+                    break
+                time.sleep(3) # 發生錯誤時等待更長時間
+            except Exception as e:
+                print(f"  - ✗ 處理搜尋結果時發生未知錯誤: {e}")
+                break
+        
+        return list(urls)[:max_images]
 
     def download_image(self, url: str, dest_path: str, timeout: int = 15) -> Tuple[bool, str]:
         try:
