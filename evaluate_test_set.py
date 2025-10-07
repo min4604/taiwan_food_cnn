@@ -9,6 +9,45 @@ import os
 import csv
 from PIL import Image
 
+def get_all_models_from_directory(models_dir='models', max_models=None):
+    """從目錄中獲取所有模型檔案
+    
+    Args:
+        models_dir: 模型目錄路徑
+        max_models: 最多使用的模型數量，None表示使用所有模型
+    
+    Returns:
+        list: 模型檔案路徑列表
+    """
+    if not os.path.exists(models_dir):
+        print(f"❌ 模型目錄不存在: {models_dir}")
+        return []
+    
+    model_files = [f for f in os.listdir(models_dir) if f.endswith('.pth')]
+    
+    if not model_files:
+        print(f"❌ 在 {models_dir} 中沒有找到任何 .pth 模型檔案")
+        return []
+    
+    # 按修改時間排序（最新的優先）
+    model_files = sorted(model_files, 
+                        key=lambda x: os.path.getmtime(os.path.join(models_dir, x)), 
+                        reverse=True)
+    
+    if max_models:
+        model_files = model_files[:max_models]
+    
+    model_paths = [os.path.join(models_dir, f) for f in model_files]
+    
+    print(f"📁 在 {models_dir} 中找到 {len(model_paths)} 個模型:")
+    for i, (path, filename) in enumerate(zip(model_paths, model_files), 1):
+        file_time = os.path.getmtime(path)
+        import time
+        time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(file_time))
+        print(f"   {i}. {filename} (修改時間: {time_str})")
+    
+    return model_paths
+
 def detect_model_architecture(model_path):
     """從模型檔案名稱中檢測模型架構"""
     filename = os.path.basename(model_path).lower()
