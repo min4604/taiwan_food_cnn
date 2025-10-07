@@ -41,6 +41,43 @@ class OptimizedAMDNPUInference:
         # 啟動後台處理執行緒
         self._start_background_processing()
     
+    def _detect_model_architecture(self, model_path):
+        """從模型檔案名稱中檢測模型架構"""
+        filename = os.path.basename(model_path).lower()
+        
+        if 'efficientnet_b3' in filename:
+            return 'efficientnet_b3'
+        elif 'convnext_tiny' in filename:
+            return 'convnext_tiny'
+        elif 'regnet_y' in filename:
+            return 'regnet_y'
+        elif 'vit' in filename:
+            return 'vit'
+        elif 'resnet50' in filename:
+            return 'resnet50'
+        else:
+            # 嘗試從模型內容檢測
+            try:
+                state_dict = torch.load(model_path, map_location='cpu')
+                keys = list(state_dict.keys())
+                
+                # 根據 state_dict 的鍵值檢測架構
+                if any('features' in key for key in keys):
+                    if any('block' in key for key in keys):
+                        return 'efficientnet_b3'  # EfficientNet 特徵
+                    elif any('stages' in key for key in keys):
+                        return 'convnext_tiny'    # ConvNeXt 特徵
+                    else:
+                        return 'efficientnet_b3'  # 預設為 EfficientNet
+                elif any('layer' in key for key in keys):
+                    return 'resnet50'             # ResNet 特徵
+                elif any('blocks' in key for key in keys):
+                    return 'vit'                  # ViT 特徵
+                else:
+                    return 'resnet50'             # 預設為 ResNet50
+            except:
+                return 'resnet50'                 # 預設為 ResNet50
+    
     def _setup_model(self, pytorch_model_path):
         """設定 AMD NPU 推理模型，針對最大使用率最佳化"""
         try:
@@ -121,10 +158,13 @@ class OptimizedAMDNPUInference:
         print("🔄 轉換 PyTorch 模型為最佳化 ONNX...")
         
         try:
-            from pytorch_model import TaiwanFoodResNet50
+            # 檢測模型架構
+            model_architecture = self._detect_model_architecture(pytorch_model_path)
+            print(f"🏗️  檢測到模型架構: {model_architecture}")
             
-            # 載入 PyTorch 模型
-            model = TaiwanFoodResNet50(num_classes=101)
+            # 載入對應的模型類型
+            from pytorch_model import get_model
+            model = get_model(model_architecture, num_classes=101, dropout_rate=0.3)
             model.load_state_dict(torch.load(pytorch_model_path, map_location='cpu'))
             model.eval()
             
@@ -371,9 +411,13 @@ class OptimizedAMDNPUInference:
     def _setup_cpu_fallback(self, pytorch_model_path):
         """設定 CPU 備援推理"""
         try:
-            from pytorch_model import TaiwanFoodResNet50
+            # 檢測模型架構
+            model_architecture = self._detect_model_architecture(pytorch_model_path)
+            print(f"🏗️  CPU 備援模式檢測到架構: {model_architecture}")
             
-            self.pytorch_model = TaiwanFoodResNet50(num_classes=101)
+            # 載入對應的模型類型
+            from pytorch_model import get_model
+            self.pytorch_model = get_model(model_architecture, num_classes=101, dropout_rate=0.3)
             self.pytorch_model.load_state_dict(torch.load(pytorch_model_path, map_location='cpu'))
             self.pytorch_model.eval()
             print("🔄 已設定 CPU 備援推理")

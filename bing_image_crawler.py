@@ -230,7 +230,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--start-id", type=int, default=None, help="起始類別 ID（包含）")
     p.add_argument("--end-id", type=int, default=None, help="結束類別 ID（包含）")
     p.add_argument("--query-prefix", default="", help="查詢關鍵字前綴")
-    p.add_argument("--query-suffix", default="taiwan food", help="查詢關鍵字後綴")
+    p.add_argument("--query-suffix", default="麻花捲", help="查詢關鍵字後綴")
     p.add_argument("--adult-filter", default="off", choices=["off", "moderate", "strict"], help="成人內容過濾")
     return p.parse_args()
 

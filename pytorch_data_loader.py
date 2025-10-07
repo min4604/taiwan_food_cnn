@@ -12,6 +12,22 @@ class TaiwanFoodDataset(Dataset):
         self.transform = transform
         self.is_test = is_test
         
+        # 建立目錄名稱映射以處理命名不一致問題
+        self.dir_mapping = {
+            'deep_fried_chicken_cutlets': 'deep-fried_chicken_cutlets',
+            'fried_spanish_mackerel_thick_soup': 'fried-spanish_mackerel_thick_soup',
+            'hakka_stir_fried': 'hakka_stir-fried',
+            'kung_pao_chicken': 'kung-pao_chicken',
+            'rice_with_soy_stewed_pork': 'rice_with_soy-stewed_pork',
+            'steam_fried_bun': 'steam-fried_bun',
+            'stir_fried_calamari_broth': 'stir-fried_calamari_broth',
+            'stir_fried_duck_meat_broth': 'stir-fried_duck_meat_broth',
+            'stir_fried_loofah_with_clam': 'stir-fried_loofah_with_clam',
+            'stir_fried_pork_intestine_with_ginger': 'stir-fried_pork_intestine_with_ginger',
+            'three_cup_chicken': 'three-cup_chicken',
+            'tube_shaped_migao': 'tube-shaped_migao',
+        }
+        
     def __len__(self):
         return len(self.data)
         
@@ -32,8 +48,24 @@ class TaiwanFoodDataset(Dataset):
                 relative_path = img_path[6:]  # 移除 "train/" 前綴
             else:
                 relative_path = img_path
+            
+            # 分離目錄名稱和檔案名稱
+            path_parts = relative_path.split('/')
+            if len(path_parts) >= 2:
+                category_name = path_parts[0]
+                filename = path_parts[1]
+                
+                # 檢查是否需要映射目錄名稱
+                if category_name in self.dir_mapping:
+                    category_name = self.dir_mapping[category_name]
+                
+                # 重新組合路徑
+                relative_path = os.path.join(category_name, filename)
+            
+            # 正規化路徑分隔符號，確保在 Windows 下正確
+            relative_path = relative_path.replace('/', os.sep).replace('\\', os.sep)
             # 組合完整路徑：base_dir + category + filename
-            img_name = os.path.join(self.img_dir, relative_path.replace('/', os.sep))
+            img_name = os.path.join(self.img_dir, relative_path)
             label = int(self.data.iloc[idx, 1])
             
         try:

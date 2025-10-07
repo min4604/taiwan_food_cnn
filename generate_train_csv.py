@@ -107,8 +107,9 @@ def generate_train_csv(train_dir: str, output_csv: str, classes_csv: str, path_r
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="自動生成訓練集 CSV 檔案（使用官方類別對應 ID）")
-    parser.add_argument('--train-dir', type=str, default='downloads/bing_images', help='訓練集根目錄')
-    parser.add_argument('--output-csv', type=str, default='train_list.csv', help='輸出 CSV 檔案名稱')
+    #parser.add_argument('--train-dir', type=str, default='downloads/bing_images', help='訓練集根目錄')
+    parser.add_argument('--train-dir', type=str, default='archive/tw_food_101/train', help='訓練集根目錄')
+    parser.add_argument('--output-csv', type=str, default='train_list1.csv', help='輸出 CSV 檔案名稱')
     parser.add_argument('--classes-csv', type=str, default=DEFAULT_CLASSES_CSV, help='官方類別列表 CSV 路徑')
     parser.add_argument('--path-root', type=str, default='train', help="輸出路徑的根目錄名稱（預設 'train'）")
     args = parser.parse_args()

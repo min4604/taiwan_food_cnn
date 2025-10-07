@@ -1,11 +1,102 @@
 import torch
 import torch.nn as nn
-from pytorch_model import TaiwanFoodResNet50
+from pytorch_model import get_model
 from pytorch_data_loader import TaiwanFoodDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import os
+import csv
+from PIL import Image
+
+def detect_model_architecture(model_path):
+    """從模型檔案名稱中檢測模型架構"""
+    filename = os.path.basename(model_path).lower()
+    
+    if 'efficientnet_b3' in filename:
+        return 'efficientnet_b3'
+    elif 'convnext_tiny' in filename:
+        return 'convnext_tiny'
+    elif 'regnet_y' in filename:
+        return 'regnet_y'
+    elif 'vit' in filename:
+        return 'vit'
+    elif 'resnet50' in filename:
+        return 'resnet50'
+    else:
+        # 預設為 ResNet50
+        print(f"⚠️  無法從檔案名稱檢測模型架構: {filename}")
+        print("   使用預設架構: ResNet50")
+        return 'resnet50'
+
+def resolve_image_paths_from_csv(test_csv, test_img_dir):
+    """從 CSV 讀取圖片路徑並盡力解析為實際檔案路徑。
+    支援兩種格式：
+      - 測試集: index,path (例如 0,test/0.jpg)
+      - 訓練清單: index,class_id,path (例如 0,0,train/bawan/0.jpg)
+    解析策略：
+      1) 如果 CSV 中的 path 是絕對路徑且存在，直接使用。
+      2) 嘗試拼接 test_img_dir + path
+      3) 嘗試拼接 test_img_dir + basename(path)
+      4) 嘗試拼接 test_img_dir + 最後兩層 (通常為 類別/檔名)
+      5) 如果 path 以 train/ 或 test/ 開頭，嘗試移除第一層再拼接
+    回傳：與 CSV 行數對應的 list，找不到則為 None。
+    """
+    paths = []
+    test_img_dir = os.path.abspath(test_img_dir)
+    with open(test_csv, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if not row:
+                paths.append(None)
+                continue
+            raw_path = row[-1].strip()  # 取最後一欄作為路徑欄
+            raw_path = raw_path.replace('\\', '/')
+
+            candidates = []
+            # 絕對路徑
+            if os.path.isabs(raw_path):
+                candidates.append(raw_path)
+            # 直接拼接 test_img_dir + raw_path
+            candidates.append(os.path.join(test_img_dir, raw_path))
+            # basename
+            candidates.append(os.path.join(test_img_dir, os.path.basename(raw_path)))
+            # 最後兩層 (類別/檔名)
+            parts = raw_path.split('/')
+            if len(parts) >= 2:
+                candidates.append(os.path.join(test_img_dir, parts[-2], parts[-1]))
+            # 去掉開頭的 train/ 或 test/
+            if parts and parts[0] in ('train', 'test'):
+                stripped = '/'.join(parts[1:])
+                candidates.append(os.path.join(test_img_dir, stripped))
+                if len(parts) >= 3:
+                    candidates.append(os.path.join(test_img_dir, parts[-2], parts[-1]))
+
+            chosen = None
+            for c in candidates:
+                if c and os.path.exists(c):
+                    chosen = c
+                    break
+            paths.append(chosen)
+    return paths
+
+def is_openable_image(path):
+    try:
+        with Image.open(path) as img:
+            img.verify()  # 快速驗證
+        return True
+    except Exception:
+        return False
+
+def filter_openable_paths(paths):
+    valid = []
+    invalid = []
+    for p in paths:
+        if p and is_openable_image(p):
+            valid.append(p)
+        else:
+            invalid.append(p)
+    return valid, invalid
 
 def detect_available_devices():
     """
@@ -222,28 +313,15 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
         print("⚠️  注意：這是首次在測試集上評估，結果代表模型的真實性能")
         print("=" * 60)
         
-        # 準備所有測試圖片路徑
-        all_image_paths = []
-        for i in range(len(test_dataset)):
-            # 尋找圖片檔案
-            base_path = os.path.join(test_img_dir, str(i))
-            img_path = None
-            
-            # 嘗試不同副檔名
-            for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']:
-                candidate_path = base_path + ext
-                if os.path.exists(candidate_path):
-                    img_path = candidate_path
-                    break
-            
-            if img_path:
-                all_image_paths.append(img_path)
-            else:
-                print(f"⚠️  找不到圖片: {base_path}")
-                all_image_paths.append(None)
+        # 準備所有測試圖片路徑 (改為從 CSV 讀取)
+        all_image_paths = resolve_image_paths_from_csv(test_csv, test_img_dir)
         
         # 過濾出有效的圖片路徑
-        valid_paths = [path for path in all_image_paths if path is not None]
+        valid_paths_quick = [path for path in all_image_paths if path is not None]
+        # 進一步驗證圖片可讀性
+        valid_paths, invalid_paths = filter_openable_paths(valid_paths_quick)
+        if invalid_paths:
+            print(f"⚠️  跳過無法讀取的圖片: {len(invalid_paths)} 張")
         print(f"📸 有效圖片: {len(valid_paths)}/{len(all_image_paths)}")
         
         # 使用最佳化的批次推理
@@ -286,8 +364,8 @@ def evaluate_with_amd_npu(model_path, test_csv, test_img_dir, num_classes=101, b
             all_confidences = []  # 單張推理模式不支援信心分數
             all_image_paths_with_results = []
             
-            with tqdm(total=len(all_image_paths), desc="AMD NPU 推理中", ncols=80) as pbar:
-                for img_path in all_image_paths:
+            with tqdm(total=len(valid_paths), desc="AMD NPU 推理中", ncols=80) as pbar:
+                for img_path in valid_paths:
                     if img_path and os.path.exists(img_path):
                         # 檢查是否支援信心分數
                         if hasattr(npu_inference, 'predict_image_with_confidence'):
@@ -389,8 +467,12 @@ def evaluate_standard_mode(model_path, test_csv, test_img_dir, num_classes, batc
         batch_size = min(batch_size, 16)  # NPU 可能需要較小的批次
         print(f"🔧 NPU 最佳化: 調整批次大小為 {batch_size}")
     
+    # 檢測模型架構
+    model_architecture = detect_model_architecture(model_path)
+    print(f"🏗️  檢測到模型架構: {model_architecture}")
+    
     # 載入模型
-    model = TaiwanFoodResNet50(num_classes=num_classes)
+    model = get_model(model_architecture, num_classes=num_classes, dropout_rate=0.3)
     try:
         # 先在 CPU 上載入，然後移動到目標裝置
         state_dict = torch.load(model_path, map_location='cpu')
@@ -536,9 +618,9 @@ if __name__ == '__main__':
         # 開始評估
         evaluate_on_test_set(
             model_path=model_path,
-            #test_csv='archive/tw_food_101/tw_food_101_test_list.csv',
-            #test_img_dir='archive/tw_food_101/test',
-            test_csv='downloads/train_list.csv',
-            test_img_dir='downloads/bing_images',
+            test_csv='archive/tw_food_101/tw_food_101_test_list.csv',
+            test_img_dir='archive/tw_food_101/test',
+            #test_csv='downloads/train_list.csv',
+            #test_img_dir='downloads/bing_images',
             manual_device_selection=manual_mode
         )
