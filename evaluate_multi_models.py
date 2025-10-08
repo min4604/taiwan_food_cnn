@@ -27,73 +27,34 @@ def detect_available_devices():
     devices = []
     device_info = []
     
-    # 檢測 AMD Ryzen AI NPU
-    amd_npu_available = False
+    # 檢測 ONNX Runtime DirectML - NPU 加速推薦方式
     onnx_dml_available = False
     
     try:
-        # 方式 1: 檢測 DirectML
-        try:
-            import torch_directml
-            if torch_directml.is_available():
-                amd_npu_available = True
-                devices.append(('dml', 'AMD NPU (DirectML)'))
-                device_info.append("🚀 AMD Ryzen AI NPU 可用 (DirectML)")
-                device_info.append("   支援: Ryzen AI 7040/8040/9HX 系列")
-        except ImportError:
-            pass
-        
-        # 方式 2: 檢測 ONNX Runtime - 推薦用於 NPU 加速
-        try:
-            import onnxruntime as ort
-            providers = ort.get_available_providers()
-            if 'DmlExecutionProvider' in providers:
-                onnx_dml_available = True
-                devices.append(('onnx_dml', 'AMD NPU (ONNX Runtime) - 推薦'))
-                device_info.append("✅ ONNX Runtime DirectML 可用 - NPU 加速推薦")
-                device_info.append("   支援: AMD Ryzen AI NPU 硬體加速")
-        except ImportError:
-            device_info.append("⚠️  ONNX Runtime 未安裝")
-            device_info.append("   建議安裝: pip install onnxruntime-directml")
-        
-        # 方式 3: 檢測 AMD Ryzen AI 處理器
-        if platform.system() == 'Windows':
-            try:
-                result = subprocess.run(['wmic', 'cpu', 'get', 'name'], 
-                                      capture_output=True, text=True, timeout=5)
-                if 'AMD Ryzen' in result.stdout and 'AI' in result.stdout:
-                    device_info.append("💻 檢測到 AMD Ryzen AI 處理器")
-                    if not (amd_npu_available or onnx_dml_available):
-                        device_info.append("   ⚠️  NPU 可能可用但未啟用")
-                        device_info.append("   建議執行: install_npu.bat")
-            except:
-                pass
-    except Exception as e:
-        pass
-    
-    # 檢測 Intel NPU (DirectML)
-    try:
-        import torch_directml
-        if torch_directml.is_available() and not amd_npu_available:
-            devices.append(('dml', 'Intel NPU (DirectML)'))
-            device_info.append("🚀 Intel NPU 可用 (DirectML)")
+        import onnxruntime as ort
+        providers = ort.get_available_providers()
+        if 'DmlExecutionProvider' in providers:
+            onnx_dml_available = True
+            devices.append(('onnx_dml', 'AMD Ryzen AI NPU (ONNX Runtime DirectML)'))
+            device_info.append("✅ ONNX Runtime DirectML 可用")
+            device_info.append("   支援: AMD Ryzen AI NPU 硬體加速")
+            device_info.append("   系列: Ryzen AI 7040/8040/9HX")
     except ImportError:
-        pass
+        device_info.append("⚠️  ONNX Runtime 未安裝")
+        device_info.append("   建議安裝: pip install onnxruntime-directml")
     
-    # 檢測傳統 NPU 支援（華為昇騰等）
-    try:
-        if hasattr(torch, 'npu') and torch.npu.is_available():
-            npu_count = torch.npu.device_count()
-            devices.append(('npu', f'華為昇騰 NPU ({npu_count}個)'))
-            device_info.append(f"🚀 華為昇騰 NPU 可用: {npu_count} 個裝置")
-            for i in range(npu_count):
-                try:
-                    npu_name = torch.npu.get_device_name(i)
-                    device_info.append(f"   NPU {i}: {npu_name}")
-                except:
-                    device_info.append(f"   NPU {i}: 未知型號")
-    except Exception as e:
-        pass
+    # 檢測 AMD Ryzen AI 處理器
+    if platform.system() == 'Windows':
+        try:
+            result = subprocess.run(['wmic', 'cpu', 'get', 'name'], 
+                                  capture_output=True, text=True, timeout=5)
+            if 'AMD Ryzen' in result.stdout and 'AI' in result.stdout:
+                device_info.append("💻 檢測到 AMD Ryzen AI 處理器")
+                if not onnx_dml_available:
+                    device_info.append("   ⚠️  NPU 可能可用但未啟用")
+                    device_info.append("   請安裝: pip install onnxruntime-directml")
+        except:
+            pass
     
     # 檢測 Apple MPS (Neural Engine)
     try:
@@ -218,8 +179,24 @@ def convert_model_to_onnx(model, model_name, input_shape=(1, 3, 224, 224), outpu
         print(f"   ⚠️  ONNX 轉換失敗: {e}")
         return None
 
-def create_onnx_session(onnx_path, use_dml=True):
-    """創建 ONNX Runtime 推理會話
+def warmup_onnx_session(session, input_shape):
+    """預熱 ONNX 會話以優化首次推理性能
+    
+    Args:
+        session: ONNX Runtime 會話
+        input_shape: 輸入形狀 (batch_size, channels, height, width)
+    """
+    try:
+        dummy_input = np.random.randn(*input_shape).astype(np.float32)
+        input_name = session.get_inputs()[0].name
+        # 執行幾次預熱推理
+        for _ in range(3):
+            _ = session.run(None, {input_name: dummy_input})
+    except:
+        pass  # 預熱失敗不影響正常使用
+
+def create_onnx_session(onnx_path, use_dml=True, enable_profiling=False):
+    """創建優化的 ONNX Runtime 推理會話（NPU 加速優化）
     
     Args:
         onnx_path: ONNX 模型路徑
@@ -231,21 +208,50 @@ def create_onnx_session(onnx_path, use_dml=True):
     try:
         import onnxruntime as ort
         
-        # 設置執行提供者
-        providers = []
-        if use_dml:
-            providers.append('DmlExecutionProvider')
-        providers.append('CPUExecutionProvider')
-        
-        # 創建會話選項
+        # 創建會話選項 - 優化配置
         sess_options = ort.SessionOptions()
-        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        
+        # 圖優化等級 - 使用最高優化（擴展優化）
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+        
+        # 啟用記憶體優化模式
+        sess_options.enable_mem_pattern = True
+        sess_options.enable_mem_reuse = True
+        sess_options.enable_cpu_mem_arena = True
+        
+        # 並行執行優化
+        sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+        sess_options.inter_op_num_threads = 2  # 操作間並行
+        sess_options.intra_op_num_threads = 4  # 操作內並行
+        
+        # 性能分析（可選）
+        if enable_profiling:
+            sess_options.enable_profiling = True
+        
+        # 設置執行提供者 - DirectML 優化配置
+        providers = []
+        provider_options = []
+        
+        if use_dml:
+            # DirectML 提供者配置（針對 AMD Ryzen AI NPU 優化）
+            dml_options = {
+                'device_id': 0,  # 使用第一個 NPU 設備
+                'disable_metacommands': False,  # 啟用 metacommands 加速
+                'enable_dynamic_graph_fusion': True,  # 啟用動態圖融合
+            }
+            providers.append('DmlExecutionProvider')
+            provider_options.append(dml_options)
+        
+        # CPU 作為回退
+        providers.append('CPUExecutionProvider')
+        provider_options.append({})
         
         # 創建推理會話
         session = ort.InferenceSession(
             onnx_path,
             sess_options=sess_options,
-            providers=providers
+            providers=providers,
+            provider_options=provider_options
         )
         
         return session
@@ -272,10 +278,20 @@ def ensemble_predict_onnx(onnx_sessions, images, strategy='weighted_average'):
     all_confidences = []
     successful_models = []
     
-    # 轉換 PyTorch 張量為 NumPy
-    images_np = images.cpu().numpy() if images.is_cuda else images.numpy()
+    # 轉換 PyTorch 張量為 NumPy（連續記憶體布局）
+    if images.is_cuda:
+        images_np = images.cpu().numpy()
+    else:
+        images_np = images.numpy()
     
-    # 收集所有模型的預測
+    # 確保連續記憶體布局（優化性能）
+    if not images_np.flags['C_CONTIGUOUS']:
+        images_np = np.ascontiguousarray(images_np)
+    
+    # 確保正確的數據類型
+    images_np = images_np.astype(np.float32)
+    
+    # 收集所有模型的預測（並行推理優化）
     for session, weight, name in onnx_sessions:
         try:
             # ONNX Runtime 推理（使用 NPU 加速）
@@ -401,27 +417,11 @@ def ensemble_predict(models_info, images, device, strategy='weighted_average'):
     all_probs = []
     successful_models = []  # 記錄成功的模型
     
-    # 檢查是否為DirectML設備
-    is_directml = 'privateuseone' in str(device).lower() or 'dml' in str(device).lower()
-    
-    # 如果是DirectML，將圖片移到CPU進行推理（避免DirectML張量操作問題）
-    if is_directml:
-        images_for_inference = images.cpu()
-    else:
-        images_for_inference = images
-    
     # 收集所有模型的預測
     for model, weight, name in models_info:
         with torch.no_grad():
             try:
-                # DirectML: 在CPU上推理
-                if is_directml:
-                    # 確保模型在CPU上
-                    model_cpu = model.cpu() if hasattr(model, 'cpu') else model
-                    outputs = model_cpu(images_for_inference)
-                else:
-                    outputs = model(images_for_inference)
-                
+                outputs = model(images.to(device))
                 probs = torch.softmax(outputs, dim=1)
                 max_probs, predicted = probs.max(1)
                 
@@ -520,47 +520,40 @@ def evaluate_multi_models(model_paths, test_csv, test_img_dir, num_classes=101,
     print("=" * 60)
     
     # 設定裝置
-    try:
-        # 處理特殊設備類型
-        if isinstance(device_str, str):
-            if device_str.startswith('cuda'):
-                device = torch.device(device_str)
-            elif device_str == 'mps':
-                device = torch.device('mps')
-            elif device_str.startswith('npu'):
-                device = torch.device(device_str)
-            elif device_str == 'cpu':
-                device = torch.device('cpu')
-            else:
-                # DirectML 或其他特殊設備
-                try:
-                    import torch_directml
-                    device = torch_directml.device()
-                except:
-                    device = torch.device('cpu')
-        else:
-            # 如果已經是設備物件
-            device = device_str
-    except Exception as e:
-        print(f"⚠️  設備初始化失敗: {e}，使用 CPU")
+    # 注意：當 use_onnx_npu=True 時，PyTorch 模型使用 CPU，推理由 ONNX Runtime 在 NPU 上執行
+    if use_onnx_npu:
         device = torch.device('cpu')
-    
-    print(f"💻 使用裝置: {device}")
+        print(f"💻 PyTorch 使用裝置: CPU (模型載入用)")
+        print(f"🚀 ONNX Runtime 將使用: NPU (DirectML 推理)")
+    else:
+        # PyTorch 模式
+        try:
+            if isinstance(device_str, str):
+                if device_str.startswith('cuda'):
+                    device = torch.device(device_str)
+                elif device_str == 'mps':
+                    device = torch.device('mps')
+                elif device_str.startswith('npu'):
+                    device = torch.device(device_str)
+                else:
+                    device = torch.device('cpu')
+            else:
+                device = device_str
+        except Exception as e:
+            print(f"⚠️  設備初始化失敗: {e}，使用 CPU")
+            device = torch.device('cpu')
+        
+        print(f"💻 使用裝置: {device}")
     
     # 顯示設備詳細資訊
-    if str(device).startswith('cuda'):
-        gpu_id = int(str(device).split(':')[1]) if ':' in str(device) else 0
-        print(f"🚀 GPU: {torch.cuda.get_device_name(gpu_id)}")
-        print(f"💾 GPU 記憶體: {torch.cuda.get_device_properties(gpu_id).total_memory / 1024**3:.1f} GB")
-    elif 'dml' in str(device).lower() or 'privateuseone' in str(device).lower():
-        print(f"🚀 使用 NPU 加速 (DirectML)")
-        print(f"💡 適合 AMD Ryzen AI / Intel Arc 系列處理器")
-        print(f"📍 注意: 由於 DirectML 張量兼容性問題，模型推理在 CPU 上進行")
-        print(f"   未來版本將優化以充分利用 NPU 硬體加速")
-    elif str(device) == 'mps':
-        print(f"🍎 使用 Apple Neural Engine (MPS)")
-    elif str(device).startswith('npu'):
-        print(f"🚀 使用華為昇騰 NPU")
+    if not use_onnx_npu:
+        if str(device).startswith('cuda'):
+            gpu_id = int(str(device).split(':')[1]) if ':' in str(device) else 0
+            print(f"🚀 GPU: {torch.cuda.get_device_name(gpu_id)}")
+            print(f"💾 GPU 記憶體: {torch.cuda.get_device_properties(gpu_id).total_memory / 1024**3:.1f} GB")
+        elif str(device) == 'mps':
+            print(f"🍎 使用 Apple Neural Engine (MPS)")
+    print("=" * 60)
     
     # 載入所有模型
     models_info = []
@@ -626,16 +619,8 @@ def evaluate_multi_models(model_paths, test_csv, test_img_dir, num_classes=101,
                     print(f"   ⚠️  跳過此模型")
                     continue
             else:
-                # PyTorch 模式
-                is_directml_device = 'privateuseone' in str(device).lower() or 'dml' in str(device).lower()
-                
-                if is_directml_device:
-                    # DirectML: 模型保持在CPU上
-                    print(f"   📍 模型載入到 CPU (DirectML 模式)")
-                else:
-                    # 其他設備: 移動到指定設備
-                    model = model.to(device)
-                
+                # PyTorch 模式（非 NPU）
+                model = model.to(device)
                 models_info.append((model, weight, model_name))
                 print(f"   ✅ 載入成功 (權重: {weight:.4f})")
             
@@ -670,13 +655,33 @@ def evaluate_multi_models(model_paths, test_csv, test_img_dir, num_classes=101,
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     
+    # NPU 批次大小優化建議
+    if use_onnx_npu:
+        # NPU 通常在較大批次下性能更好
+        original_batch_size = batch_size
+        if batch_size < 32:
+            batch_size = 32
+            print(f"\n💡 NPU 優化: 批次大小從 {original_batch_size} 調整為 {batch_size}")
+            print(f"   較大批次能更好利用 NPU 並行計算能力")
+    
     # 建立測試集 DataLoader
     print("\n📊 載入測試集資料...")
     test_dataset = TaiwanFoodDataset(test_csv, test_img_dir, test_transform, is_test=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    
+    # NPU 優化：使用 pin_memory 加速數據傳輸
+    pin_memory = use_onnx_npu
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=0,
+        pin_memory=pin_memory
+    )
     
     print(f"   測試集大小: {len(test_dataset)} 張圖片")
     print(f"   批次大小: {batch_size}")
+    if use_onnx_npu:
+        print(f"   NPU 優化: 已啟用記憶體固定 (pin_memory)")
     print("=" * 60)
     
     # 執行集成預測
@@ -890,26 +895,6 @@ def main():
             if 0 <= idx < len(available_devices):
                 device_str, device_name = available_devices[idx]
                 print(f"✅ 選擇設備: {device_name}")
-                
-                # 特殊處理 DirectML 設備
-                if device_str == 'dml':
-                    try:
-                        import torch_directml
-                        device = torch_directml.device()
-                        device_str = str(device)  # 轉換為字串表示
-                        print(f"   設備物件: {device_str}")
-                    except ImportError:
-                        print("⚠️  torch_directml 未安裝，改用 CPU")
-                        device_str = 'cpu'
-                    except Exception as e:
-                        print(f"⚠️  DirectML 初始化失敗: {e}，改用 CPU")
-                        device_str = 'cpu'
-                elif device_str == 'onnx_dml':
-                    # ONNX Runtime 模式下，實際訓練還是用 CPU，但推理會用 NPU
-                    print("   注意: ONNX Runtime NPU 模式")
-                    print("   訓練使用 CPU，推理透過 ONNX Runtime 加速")
-                    device_str = 'cpu'
-                
                 break
             else:
                 print(f"⚠️  請輸入 1-{len(available_devices)}")
@@ -922,11 +907,10 @@ def main():
     # 如果選擇了 ONNX DML 設備，詢問是否使用 NPU 加速
     use_onnx_npu = False
     if device_str == 'onnx_dml':
-        print("\n🚀 AMD Ryzen AI NPU 優化選項")
+        print("\n🚀 AMD Ryzen AI NPU 加速")
         print("=" * 60)
-        print("檢測到 ONNX Runtime DirectML 可用")
-        print("是否啟用 NPU 硬體加速？")
-        print("1. ✅ 是 - 使用 ONNX Runtime DirectML (推薦，充分利用 NPU)")
+        print("是否啟用 ONNX Runtime DirectML NPU 硬體加速？")
+        print("1. ✅ 是 - 使用 ONNX Runtime DirectML (推薦)")
         print("2. ❌ 否 - 使用 PyTorch CPU 模式")
         print("=" * 60)
         
@@ -936,8 +920,8 @@ def main():
                 if npu_choice == '' or npu_choice == '1':
                     use_onnx_npu = True
                     print("✅ 已啟用 ONNX Runtime NPU 加速")
-                    print("💡 模型將轉換為 ONNX 格式並使用 DirectML 執行")
-                    device_str = 'cpu'  # ONNX Runtime 會處理設備，PyTorch 端使用CPU
+                    print("💡 模型將轉換為 ONNX 格式並在 NPU 上執行")
+                    device_str = 'cpu'  # PyTorch 端使用 CPU 載入模型
                     break
                 elif npu_choice == '2':
                     use_onnx_npu = False
