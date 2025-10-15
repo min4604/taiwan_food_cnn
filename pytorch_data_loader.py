@@ -80,7 +80,7 @@ class TaiwanFoodDataset(Dataset):
             
         return image, label
 
-def get_dataloaders(train_csv, test_csv, train_img_dir, test_img_dir, batch_size=32, img_size=224, val_split=0.2):
+def get_dataloaders(train_csv, test_csv, train_img_dir, test_img_dir, batch_size=32, img_size=224, val_split=0.2, num_workers=0, pin_memory=False):
     """
     建立訓練、驗證和測試的 DataLoader
     
@@ -88,11 +88,16 @@ def get_dataloaders(train_csv, test_csv, train_img_dir, test_img_dir, batch_size
     - 訓練集：用於模型學習
     - 驗證集：從訓練集分割出來，用於調參和早停
     - 測試集：完全獨立，僅用於最終模型評估
+    
+    參數：
+    - num_workers：資料載入的工作執行緒數，建議 GPU 訓練時設為 4
+    - pin_memory：是否使用固定記憶體，建議 GPU 訓練時設為 True
     """
-    # 訓練資料增強
+    # 增強的訓練資料增強
     train_transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.RandomHorizontalFlip(0.5),
+        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.RandomRotation(10),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -125,9 +130,30 @@ def get_dataloaders(train_csv, test_csv, train_img_dir, test_img_dir, batch_size
     # 測試集（沒有標籤）
     test_dataset = TaiwanFoodDataset(test_csv, test_img_dir, val_transform, is_test=True)
     
-    # Windows 環境下建議設 num_workers=0 避免多進程問題
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    print(f"📥 數據加載器配置: num_workers={num_workers}, pin_memory={pin_memory}, batch_size={batch_size}")
+    
+    # 根據參數配置 DataLoader
+    train_loader = DataLoader(
+        train_subset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=True  # 丟棄不完整批次，避免批次歸一化問題
+    )
+    val_loader = DataLoader(
+        val_subset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
     
     return train_loader, val_loader, test_loader
